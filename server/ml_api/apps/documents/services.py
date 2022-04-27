@@ -13,7 +13,7 @@ from sklearn.svm import OneClassSVM
 from sklearn.preprocessing import StandardScaler
 from sklearn.covariance import EllipticEnvelope
 from sklearn.neighbors import LocalOutlierFactor
-from sklearn.feature_selection import SelectKBest, f_classif, SelectFpr, SelectFwe, SelectFdr
+from sklearn.feature_selection import SelectKBest, f_classif, SelectFpr, SelectFwe, SelectFdr, RFE, SelectFromModel
 from sklearn.decomposition import PCA
 import pickle
 
