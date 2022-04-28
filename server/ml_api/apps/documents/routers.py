@@ -18,18 +18,37 @@ documents_crud_router = APIRouter(
 def load_document(filename: str, file: UploadFile = File(...), db: get_db = Depends(),
                   user: UserDB = Depends(current_active_user)):
     result = DocumentService(db, user).upload_document_to_db(file=file.file, filename=filename)
-    if result == True:
+    if result:
         return JSONResponse(status_code=status.HTTP_200_OK, content=f"The document '{filename}' successfully added")
     return JSONResponse(status_code=status.HTTP_409_CONFLICT, content=f"The document name '{result}' is already taken")
 
 
-@documents_crud_router.get("")  # +
+@documents_crud_router.get("")
 def read_document(filename: str, db: get_db = Depends(), user: UserDB = Depends(current_active_user)):
     result = DocumentService(db, user).read_document_from_db(filename)
     if result is None:
         return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content="No such csv document")
     else:
         return JSONResponse(status_code=status.HTTP_200_OK, content=result.head(100).to_json())
+
+
+@documents_crud_router.get("/info")
+def read_document_info(filename: str, db: get_db = Depends(), user: UserDB = Depends(current_active_user)):
+    result = DocumentService(db, user).read_document_info(filename=filename)
+    return result
+
+
+@documents_crud_router.put("/pipeline")
+def apply_pipeline_to_csv(document_from: str, document_to: str, db: get_db = Depends(), user: UserDB = Depends(current_active_user)):
+    pipeline = DocumentService(db, user).read_pipeline(document_from)
+    DocumentService(db, user).apply_pipeline_to_csv(filename=document_to, pipeline=pipeline)
+    return "OK"
+
+
+@documents_crud_router.get("/all")
+def read_all_user_documents(db: get_db = Depends(), user: UserDB = Depends(current_active_user)):
+    result = DocumentService(db, user).read_documents_info()
+    return result
 
 
 @documents_crud_router.get("/download")
@@ -70,20 +89,7 @@ def read_column_marks(filename: str, db: get_db = Depends(), user: UserDB = Depe
     return result
 
 
-@documents_crud_router.get("/pipeline")
-def read_pipeline(filename: str, db: get_db = Depends(), user: UserDB = Depends(current_active_user)):
-    result = DocumentService(db, user).read_pipeline(filename)
-    return result
-
-
-
-
-
 ### ---------------------------------------------UNCHECKED--------------------------------------------------------------
-
-
-
-
 
 
 documents_method_router = APIRouter(
@@ -125,6 +131,12 @@ def standartize_features(filename: str, db: get_db = Depends(), user: UserDB = D
     return {"filename": filename}
 
 
+@documents_method_router.put("/fs_select_k_best")
+def fs_select_k_best(filename: str, db: get_db = Depends(), user: UserDB = Depends(current_active_user)):
+    DocumentService(db, user).fs_select_k_best(filename)
+    return {"filename": filename}
+
+
 @documents_method_router.put("/outlier_three_sigma")
 def outlier_three_sigma(filename: str, db: get_db = Depends(), user: UserDB = Depends(current_active_user)):
     DocumentService(db, user).outlier_three_sigma(filename)
@@ -133,5 +145,5 @@ def outlier_three_sigma(filename: str, db: get_db = Depends(), user: UserDB = De
 
 @documents_method_router.put("/miss_insert_mean_mode")
 def miss_insert_mean_mode(filename: str, db: get_db = Depends(), user: UserDB = Depends(current_active_user)):
-    DocumentService(db, user).miss_insert_mean_mode(filename) #Границу вводит юзер
+    DocumentService(db, user).miss_insert_mean_mode(filename)  # Границу вводит юзер
     return {"filename": filename}

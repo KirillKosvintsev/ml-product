@@ -38,6 +38,14 @@ class ModelService:
         }
         ModelPostgreCRUD(self._db, self._user).update_model(model_name, query)
 
+    def read_model_info(self, model_name: str):
+        model = ModelPostgreCRUD(self._db, self._user).read_model_by_name(model_name=model_name)
+        return model
+
+    def read_models_info(self):
+        models = ModelPostgreCRUD(self._db, self._user).read_all_models_by_user()
+        return models
+
     def delete_model_from_db(self, model_name: str):
         ModelPickleCRUD(self._user).delete_model(model_name)
         ModelPostgreCRUD(self._db, self._user).delete_model(model_name)
@@ -46,13 +54,13 @@ class ModelService:
                     model_params: List[ModelWithParams], params_type: str, document_name: str,
                     model_name: str, background_tasks: BackgroundTasks, test_size: Optional[float] = 0.2):
         # checks if name is available
-        model_info = ModelPostgreCRUD(self._db, self._user).read_model_info(model_name)
+        model_info = ModelPostgreCRUD(self._db, self._user).read_model_by_name(model_name)
         if model_info is not None:
-            return JSONResponse(status_code=status.HTTP_406_NOT_ACCEPTABLE, content=f"The model name '{model_info[0]}' "
+            return JSONResponse(status_code=status.HTTP_406_NOT_ACCEPTABLE, content=f"The model name '{model_info['name']}' "
                                                                                     f"is already taken")
         # checks if data exists
-        document_id = DocumentService(self._db, self._user).read_document_id(filename=document_name)
-        if document_id is None:
+        document_info = DocumentService(self._db, self._user).read_document_info(filename=document_name)
+        if document_info is None:
             return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content="No such csv document")
 
         # checks composition settings
@@ -70,14 +78,14 @@ class ModelService:
         if task_type == 'classification' and target.nunique() == 1:
             return JSONResponse(status_code=status.HTTP_406_NOT_ACCEPTABLE, content="Only one class label in csv")
 
-        ModelPostgreCRUD(self._db, self._user).new_model(model_name=model_name, csv_id=document_id,
+        ModelPostgreCRUD(self._db, self._user).new_model(model_name=model_name, csv_id=str(document_info['id']),
                                                          task_type=task_type, composition_type=composition_type,
                                                          hyperparams=[], metrics={})
 
         background_tasks.add_task(self.validate_training, features, target, task_type, composition_type, model_params,
                                   params_type, model_name, test_size)
 
-        return JSONResponse(status_code=status.HTTP_200_OK, content=f"Training of model {model_name} "
+        return JSONResponse(status_code=status.HTTP_200_OK, content=f"Training of model '{model_name}' "
                                                                     f"starts at background")
 
     def validate_training(self, features, target, task_type: str, composition_type: str,
@@ -107,11 +115,13 @@ class ModelService:
         }
         ModelPostgreCRUD(self._db, self._user).update_model(model_name=model_name, query=query)
 
-    # def predict_on_model(self, filename: str, model_name: str = 'tree'):
-    #     data = self.get_document(filename).iloc[-10:].drop('Species', axis=1)
-    #     model = ModelPickleCRUD(self._user).read_model(model_name)
-    #     predictions = model.predict(data)
-    #     return list(predictions)
+    def predict_on_model(self, filename: str, model_name: str):
+        data = DocumentService(self._db, self._user).read_document_from_db(filename)
+        target_column = DocumentService(self._db, self._user).read_column_marks(filename)['target']
+        features = data.drop(target_column, axis=1)
+        model = ModelPickleCRUD(self._user).read_model(model_name)
+        predictions = model.predict(features)
+        return list(predictions)
 
 
 class AutoParamsSearch:

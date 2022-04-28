@@ -45,16 +45,17 @@ class DocumentPostgreCRUD(BaseCrud):
         self.session.commit()
 
     # READ
-    def read_document_column(self, filename: str, column: Optional[str] = None):
+    def read_document_by_name(self, filename: str):
         filepath = self.file_path(filename)
-        if not column:
-            return self.session.query(Document.id).filter(Document.filepath == filepath).first()
-        if column == 'pipeline':
-            return self.session.query(Document.pipeline).filter(Document.filepath == filepath).first()[0]
-        if column == 'column_marks':
-            return self.session.query(Document.column_marks).filter(Document.filepath == filepath).first()[0]
-        else:
-            return False
+        document = self.session.query(Document.id, Document.name, Document.upload_date, Document.change_date, Document.pipeline,
+                                      Document.column_marks).filter(Document.filepath == filepath).first()
+        if document is not None:
+            return document
+        return None
+
+    def read_all_documents_by_user(self):
+        return self.session.query(Document.name, Document.upload_date, Document.change_date).\
+            filter(Document.user_id == self.user_id).all()
 
     # UPDATE
     def update_document(self, filename: str, query: Dict):

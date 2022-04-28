@@ -50,16 +50,17 @@ class ModelPostgreCRUD(BaseCrud):
         self.session.commit()
 
     # READ
-    def read_model_info(self, filename: str, column: Optional[str] = None):
-        filepath = self.file_path(filename)
-        if not column:
-            return self.session.query(Model.name).filter(Model.filepath == filepath).first()
-        if column == 'composition':
-            return self.session.query(Model.composition).filter(Model.filepath == filepath).first()[0]
-        if column == 'hyperparams':
-            return self.session.query(Model.hyperparams).filter(Model.filepath == filepath).first()[0]
-        else:
-            return False
+    def read_model_by_name(self, model_name: str):
+        filepath = self.file_path(model_name)
+        model = self.session.query(Model.id, Model.name, Model.create_date, Model.task_type, Model.composition_type,
+                                   Model.hyperparams, Model.metrics).filter(Model.filepath == filepath).first()
+        if model is not None:
+            return model
+        return None
+
+    def read_all_models_by_user(self):
+        return self.session.query(Model.name, Model.create_date, Model.task_type, Model.composition_type).\
+            filter(Model.user_id == self.user_id).all()
 
     # UPDATE
     def update_model(self, model_name: str, query: Dict):
@@ -106,7 +107,3 @@ class ModelPickleCRUD(BaseCrud):
     # DELETE
     def delete_model(self, model_name: str):
         os.remove(self.file_path(model_name))
-
-
-# class ReportCRUD(BaseCrud):
-#

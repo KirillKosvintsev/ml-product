@@ -11,15 +11,15 @@ from sklearn.impute import IterativeImputer
 from sklearn.ensemble import IsolationForest
 from scipy.stats import mode
 from sklearn.svm import OneClassSVM, SVR
-from sklearn.preprocessing import OrdinalEncoder, StandardScaler
+from sklearn.preprocessing import OrdinalEncoder, StandardScaler, OneHotEncoder
 from sklearn.covariance import EllipticEnvelope
 from sklearn.neighbors import LocalOutlierFactor
-from sklearn.feature_selection import SelectKBest, f_classif, SelectFpr, SelectFwe, SelectFdr, RFE, SelectFromModel
+from sklearn.feature_selection import SelectKBest, f_classif, SelectFpr, SelectFwe, SelectFdr, RFE, SelectFromModel, SelectPercentile, VarianceThreshold, GenericUnivariateSelect
 from sklearn.decomposition import PCA
 from sklearn.base import BaseEstimator
 import pickle
 
-from sympy import numer
+from sympy import numer, per
 
 from ml_api.apps.documents.models import Document
 from ml_api.apps.documents.repository import DocumentFileCRUD, DocumentPostgreCRUD
@@ -32,24 +32,26 @@ class DocumentService:
         self._user = user
 
     def upload_document_to_db(self, file, filename: str):
-        document_name = DocumentPostgreCRUD(self._db, self._user).read_document_column(filename, column=None)
-        if document_name is not None:
-            return document_name[0]
+        document = DocumentPostgreCRUD(self._db, self._user).read_document_by_name(filename)
+        if document is not None:
+            return document['name']
         DocumentFileCRUD(self._user).upload_document(filename, file)
         DocumentPostgreCRUD(self._db, self._user).new_document(filename)
         return True
 
     def read_document_from_db(self, filename: str) -> pd.DataFrame:
-        if self.read_document_id(filename=filename):
+        if DocumentPostgreCRUD(self._db, self._user).read_document_by_name(filename=filename) is not None:
             df = DocumentFileCRUD(self._user).read_document(filename)
             return df
         return None
 
-    def read_document_id(self, filename: str) -> pd.DataFrame:
-        document_id = DocumentPostgreCRUD(self._db, self._user).read_document_column(filename, column=None)
-        if document_id is None:
-            return None
-        return str(document_id[0])
+    def read_document_info(self, filename: str):
+        document = DocumentPostgreCRUD(self._db, self._user).read_document_by_name(filename=filename)
+        return document
+
+    def read_documents_info(self):
+        documents = DocumentPostgreCRUD(self._db, self._user).read_all_documents_by_user()
+        return documents
 
     def download_document_from_db(self, filename: str):
         file = DocumentFileCRUD(self._user).download_document(filename)
@@ -73,7 +75,7 @@ class DocumentService:
         DocumentPostgreCRUD(self._db, self._user).delete_document(filename)
 
     def read_pipeline(self, filename: str):
-        pipeline = DocumentPostgreCRUD(self._db, self._user).read_document_column(filename, column='pipeline')
+        pipeline = DocumentPostgreCRUD(self._db, self._user).read_document_by_name(filename)['pipeline']
         return pipeline
 
     def update_pipeline(self, filename: str, method: str):
@@ -89,8 +91,7 @@ class DocumentService:
         return df.columns.to_list()
 
     def read_column_marks(self, filename: str):
-        column_marks = dict(DocumentPostgreCRUD(self._db, self._user).read_document_column(filename,
-                                                                                           column='column_marks'))
+        column_marks = dict(DocumentPostgreCRUD(self._db, self._user).read_document_by_name(filename)['column_marks'])
         return column_marks
 
     def update_column_marks(self, filename: str, column_marks: Dict[str, Union[List[str], str]]):
@@ -98,6 +99,15 @@ class DocumentService:
             'column_marks': column_marks
         }
         DocumentPostgreCRUD(self._db, self._user).update_document(filename, query)
+
+    def apply_pipeline_to_csv(self, filename: str, pipeline: List[str]):
+        for function in pipeline:
+            if function == 'standardize_features':
+                self.standardize_features(filename=filename)
+            elif function == 'fs_select_k_best':
+                self.fs_select_k_best(filename=filename)
+            else:
+                raise Exception("Error in pipeline")
 
     # DOCUMENT CHANGING METHODS
     def remove_duplicates(self, filename: str):
@@ -332,6 +342,60 @@ class DocumentService:
         DocumentFileCRUD(self._user).update_document(filename, document)
         self.update_pipeline(filename, method='fs_select_from_model')
 
+    def fs_select_percentile(
+        self,
+        filename: str,
+        score_func: Callable[
+            [np.ndarray, np.ndarray],
+            Tuple[np.ndarray, np.ndarray]
+        ] = f_classif,
+        percentile: int = 10
+    ):
+        document = DocumentFileCRUD(self._user).read_document(filename)
+        X, y = document.drop('target', axis=1), document['target']
+        selector = SelectPercentile(score_func=score_func, percentile=percentile)
+        selector.fit(X, y)
+        document = pd.DataFrame(selector.transform(X), columns=document.columns[selector.get_support(indices=True)])
+        document['target'] = y
+        self.update_change_date_in_db(filename)
+        DocumentFileCRUD(self._user).update_document(filename, document)
+        self.update_pipeline(filename, method='fs_select_percentile')
+
+    def fs_variance_threshold(
+        self,
+        filename: str,
+        threshold: float = 0.0
+    ):
+        document = DocumentFileCRUD(self._user).read_document(filename)
+        X, y = document.drop('target', axis=1), document['target']
+        selector = VarianceThreshold(threshold=threshold)
+        selector.fit(X, y)
+        document = pd.DataFrame(selector.transform(X), columns=document.columns[selector.get_support(indices=True)])
+        document['target'] = y
+        self.update_change_date_in_db(filename)
+        DocumentFileCRUD(self._user).update_document(filename, document)
+        self.update_pipeline(filename, method='fs_variance_threshold')
+
+    def fs_generic_univariate_select(
+        self,
+        filename: str,
+        score_func: Callable[
+            [np.ndarray, np.ndarray],
+            Tuple[np.ndarray, np.ndarray]
+        ] = f_classif,
+        mode: str = 'percentile',
+        param: Union[int, float] = 1e-5
+    ):
+        document = DocumentFileCRUD(self._user).read_document(filename)
+        X, y = document.drop('target', axis=1), document['target']
+        selector = GenericUnivariateSelect(score_func=score_func, mode=mode, param=param)
+        selector.fit(X, y)
+        document = pd.DataFrame(selector.transform(X), columns=document.columns[selector.get_support(indices=True)])
+        document['target'] = y
+        self.update_change_date_in_db(filename)
+        DocumentFileCRUD(self._user).update_document(filename, document)
+        self.update_pipeline(filename, method='fs_generic_univariate_select')
+
     def encoding_Ordinal(self, filename: str):
         document = DocumentFileCRUD(self._user).read_document(filename)
         categorical = self.read_column_marks(filename)['categorical']
@@ -339,6 +403,19 @@ class DocumentService:
         self.update_change_date_in_db(filename)
         DocumentFileCRUD(self._user).update_document(filename, document)
         self.update_pipeline(filename, method='encoding_Ordinal')
+
+    def one_hot_encoding(self, filename: str):
+        document = DocumentFileCRUD(self._user).read_document(filename)
+        categorical = self.read_column_marks(filename)['categorical']
+        enc = OneHotEncoder()
+        enc.fit(document[categorical])
+        document[enc.get_feature_names(categorical)] = enc.transform(document[categorical]).toarray()
+        document.drop(categorical, axis=1, inplace=True)
+        self.update_change_date_in_db(filename)
+        DocumentFileCRUD(self._user).update_document(filename, document)
+        self.update_pipeline(filename, method='one_hot_encoding')
+
+    
           
 ### ---------------------------------------------UNCHECKED--------------------------------------------------------------
 
