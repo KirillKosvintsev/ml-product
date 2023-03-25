@@ -34,7 +34,5 @@ REGRESSION_CONFIG = {
        'alpha': hp.uniform('alpha', 1e-6, 1e-3),
        'l1_ratio': hp.uniform('l1_ratio', 0.05, 0.95),
        'learning_rate': hp.choice(label='learning_rate', options=['constant', 'optimal', 'invscaling', 'adaptive']),
-       'eta0': hp.uniform('eta0', 1e-4, 1e-1),
-       'power_t': hp.uniform('power_t', 0.1, 0.9),
     },
 }
